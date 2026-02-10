@@ -1,185 +1,108 @@
-# Next.js + shadcn/ui Template
+# CF Browser Rendering Local Issue Reproduce
 
-A modern, feature-rich template with **Next.js 15**, **shadcn/ui**, **Zustand**, **next-themes**, and **next-intl** internationalization. Perfect for kickstarting your next project with powerful built-in features.
+Minimal reproduction project for a **Miniflare browser rendering binding bug**: CDP WebSocket messages exceeding 1MB cause a 180-second timeout during local development.
 
-Built by **[LIKEDREAMWALKER](https://github.com/LikeDreamwalker)** with love ❤️
+## The Issue
 
-## 🚀 Live Demo
+When using `@cloudflare/puppeteer` with Miniflare's browser rendering binding in local dev, `page.evaluate()` or `element.evaluate()` calls that transmit >1MB of data over CDP will hang for ~180 seconds and then timeout.
 
-Check out the live demo: [nextjs-shadcn-template-alpha.vercel.app](https://nextjs-shadcn-template-alpha.vercel.app)
+### Root Cause
 
-## ✨ Features
+Miniflare's `binding.worker.ts` strips/adds a 4-byte header on each WebSocket frame but does not support `@cloudflare/puppeteer`'s chunking protocol. When a message exceeds 1MB and gets split into multiple frames, the second frame is mishandled -- Chrome never receives the complete command and times out after 180 seconds.
 
-- 🎯 **[Next.js 15](https://nextjs.org)** - Latest React framework with App Router
-- 🎨 **[shadcn/ui](https://ui.shadcn.com)** - Beautiful and accessible UI components
-- 📦 **[Zustand](https://zustand-demo.pmnd.rs)** - Simple and scalable state management
-- 🌙 **[next-themes](https://github.com/pacocoursey/next-themes)** - Perfect dark mode support
-- 🌍 **[next-intl](https://next-intl-docs.vercel.app)** - Complete internationalization (English & Chinese)
-- 💼 **TypeScript** - Full type safety out of the box
-- 🎨 **[Tailwind CSS](https://tailwindcss.com)** - Utility-first CSS framework
-- 📱 **Responsive Design** - Mobile-first approach
-- ⚡ **Turbopack** - Ultra-fast development server
+### Official Evidence
 
-## 🛠️ Tech Stack
+- [workers-sdk PR #9796](https://github.com/cloudflare/workers-sdk/pull/9796) explicitly states: *"It support puppeteer and messages < 1MB"*
+- Source code contains: `HACK: TODO: Figure out what the chunking mechanism is`
 
-| Technology   | Purpose              | Version |
-| ------------ | -------------------- | ------- |
-| Next.js      | React Framework      | 15.5.0  |
-| shadcn/ui    | UI Component Library | Latest  |
-| Zustand      | State Management     | 5.0.8   |
-| next-themes  | Theme Management     | 0.4.6   |
-| next-intl    | Internationalization | 4.3.4   |
-| TypeScript   | Type Safety          | 5.x     |
-| Tailwind CSS | Styling              | 4.x     |
+### Scope
 
-## 🚦 Getting Started
+**Only affects local development** via Miniflare. Production CF Workers environment is not affected.
+
+## Reproducing
 
 ### Prerequisites
 
-- Node.js 18.17 or later
-- pnpm (recommended) or npm/yarn
+- Node.js 18+
+- pnpm
+- A Cloudflare account (Workers Paid plan for Browser Rendering)
 
-### Installation
-
-1. **Clone this repository**
-
-   ```bash
-   git clone https://github.com/ldw-templates/nextjs-shadcn-template.git
-   cd nextjs-shadcn-template
-   ```
-
-2. **Install dependencies**
-
-   ```bash
-   pnpm install
-   # or
-   npm install
-   ```
-
-3. **Run the development server**
-
-   ```bash
-   pnpm dev
-   # or
-   npm run dev
-   ```
-
-4. **Open your browser**
-
-   Visit [http://localhost:3000](http://localhost:3000) to see the result.
-
-## 📂 Project Structure
-
-```
-nextjs-shadcn-template/
-├── src/
-│   ├── app/                  # App Router (Next.js 13+)
-│   │   ├── [locale]/        # Internationalized routes
-│   │   ├── layout.tsx       # Root layout
-│   │   └── globals.css      # Global styles
-│   ├── components/          # Reusable components
-│   │   ├── ui/             # shadcn/ui components
-│   │   ├── demo-card/      # Demo showcase component
-│   │   ├── theme-button/   # Theme toggle component
-│   │   └── language-selector/ # Language switcher
-│   ├── providers/          # Context providers
-│   │   ├── store-provider.tsx    # Zustand store provider
-│   │   └── theme-provider.tsx    # Theme provider
-│   ├── stores/             # Zustand stores
-│   │   └── store.ts        # Main app store
-│   ├── i18n/              # Internationalization
-│   │   ├── routing.ts     # Locale routing config
-│   │   └── request.ts     # Request configuration
-│   └── lib/               # Utility functions
-│       └── utils.ts       # Shared utilities
-├── messages/              # Translation files
-│   ├── en.json           # English translations
-│   └── zh.json           # Chinese translations
-└── public/               # Static assets
-```
-
-## 🎨 Customization
-
-### Adding New Languages
-
-1. Add the locale to `src/i18n/routing.ts`:
-
-   ```typescript
-   locales: ["en", "zh", "your-locale"];
-   ```
-
-2. Create translation file `messages/your-locale.json`
-
-3. Update the language selector in `src/components/language-selector/index.tsx`
-
-### Adding New Components
-
-Use shadcn/ui CLI to add components:
+### Setup
 
 ```bash
-pnpm dlx shadcn@latest add button
-# or
-npx shadcn@latest add button
+pnpm install
+npx wrangler login
+pnpm dev
 ```
 
-### Extending Zustand Store
+### Reproduce the 1MB limit
 
-Edit `src/stores/store.ts` to add your state and actions:
+1. Open `http://localhost:3000`
+2. Click **"Test evaluate() Payload Size"** -- observe that payloads <1MB succeed and >1MB timeout
+3. Alternatively: click **"Capture Elements"** with the YouTube embed card present -- the `replaceChild` evaluate call transmits a large base64 screenshot and triggers the timeout
 
-```typescript
-export type AppState = {
-  count: number;
-  // Add your state here
-};
+### Reproduce with screenshots
 
-export type AppActions = {
-  incrementCount: () => void;
-  // Add your actions here
-};
+1. Set **Extra Cards** to 0 (default -- includes dashboard + YouTube embed)
+2. Set **DPR** to 2 or higher (increases screenshot base64 size)
+3. Click **"Capture Elements"**
+4. Observe logs: `dashboard` card captures normally, `youtube-embed` card hangs at `replaceChild starting...` for ~180 seconds
+
+### Verify production works fine
+
+```bash
+pnpm deploy
 ```
 
-## 📦 Available Scripts
+The same flow works without issues on the deployed CF Workers version, confirming this is a Miniflare-only bug.
 
-- `pnpm dev` - Start development server
-- `pnpm build` - Build for production
-- `pnpm start` - Start production server
-- `pnpm lint` - Run ESLint
+## Key Findings
 
-## 🌐 Deployment
+| Scenario | Result |
+|----------|--------|
+| `evaluate()` with <1MB payload | Normal (ms-level) |
+| `evaluate()` with >1MB payload | ~180s timeout |
+| `element.screenshot()` on iframe element | Normal |
+| `element.evaluate(replaceChild)` with large base64 on iframe | ~180s timeout |
+| 21 elements x `screenshot()` only (no replace) | 3.5s total, linear scaling |
+| Production CF Workers (any payload size) | Normal |
 
-The easiest way to deploy is using [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js):
+## `remote: true` Behavior
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/ldw-templates/nextjs-shadcn-template)
+| Config | Browser location | Can access localhost | Use case |
+|--------|-----------------|---------------------|----------|
+| No `remote` (default) | Local Chromium via Miniflare | Yes | Local dev |
+| `remote: true` | CF remote browser | No | Requires publicly accessible URL |
+| Production | CF remote browser | N/A (uses deployed domain) | Production |
 
-Or deploy to other platforms:
+Without `remote: true`, `@cloudflare/puppeteer` launches a local Chromium through Miniflare's proxy -- functionally equivalent to native puppeteer, but subject to the 1MB WebSocket frame limitation.
 
-- [Netlify](https://netlify.com)
-- [Railway](https://railway.app)
-- [Render](https://render.com)
+## Project Structure
 
-## 🤝 Contributing
+```
+src/
+├── actions/screenshot.ts          # Server Actions: screenshot + payload test
+├── app/
+│   ├── [locale]/page.tsx          # Main page with test UI
+│   └── render/demo/page.tsx       # RSC target page (?cards=N for stress test)
+├── components/
+│   └── screenshot-demo/index.tsx  # Interactive test UI
+wrangler.jsonc                     # CF Workers config (BROWSER binding)
+open-next.config.ts                # OpenNext adapter config
+next.config.ts                     # initOpenNextCloudflareForDev()
+```
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## Tech Stack
 
-## 👨‍💻 Author
+Next.js 15.5.12 / React 19 / TypeScript 5 / Tailwind CSS 4 / shadcn/ui / @opennextjs/cloudflare 1.16.3 / @cloudflare/puppeteer 1.0.6 / wrangler 4.63.0
 
-**LIKEDREAMWALKER**
+## CF Deployment
 
-- 🏠 Homepage: [https://ldwid.com](https://ldwid.com)
-- 🐙 GitHub: [@LikeDreamwalker](https://github.com/LikeDreamwalker)
-- 📁 Templates: [@ldw-templates](https://github.com/ldw-templates)
+- **Build command**: `npx opennextjs-cloudflare build`
+- **Deploy command**: `npx wrangler deploy`
+- Browser Rendering binding: `BROWSER` in `wrangler.jsonc`
 
-## 📄 License
+## Related
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Next.js](https://nextjs.org) team for the amazing framework
-- [shadcn](https://github.com/shadcn) for the beautiful UI components
-- [Vercel](https://vercel.com) for the hosting platform
-- All the open-source contributors who made this possible
-
----
-
-⭐ If you find this template helpful, please consider giving it a star!
+- [opennextjs/opennextjs-cloudflare#1003](https://github.com/opennextjs/opennextjs-cloudflare/issues/1003)
+- [cloudflare/workers-sdk PR #9796](https://github.com/cloudflare/workers-sdk/pull/9796)
