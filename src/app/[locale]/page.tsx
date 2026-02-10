@@ -1,9 +1,9 @@
-import { DemoCard } from "@/components/demo-card";
+import { ScreenshotDemo } from "@/components/screenshot-demo";
 
 export default async function HomePage() {
   return (
     <main>
-      <DemoCard />
+      <ScreenshotDemo />
     </main>
   );
 }
