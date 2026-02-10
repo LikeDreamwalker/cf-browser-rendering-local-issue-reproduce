@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import puppeteer from "@cloudflare/puppeteer";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
@@ -16,7 +17,12 @@ export async function takeScreenshot(
   dpr: number = 2
 ): Promise<ScreenshotResult> {
   const logs: string[] = [];
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+
+  // Derive base URL from request headers (works in both local dev and CF production)
+  const headersList = await headers();
+  const host = headersList.get("host") || "localhost:3000";
+  const protocol = headersList.get("x-forwarded-proto") || "https";
+  const baseUrl = `${protocol}://${host}`;
   const targetUrl = `${baseUrl}/render/demo`;
   const viewportWidth = 1280;
   const viewportHeight = 720;
